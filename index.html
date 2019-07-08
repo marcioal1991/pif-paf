@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="eng">
+
+<head>
+    <title>Pife</title>
+    <link href="assets/css/bulma.css" type="text/css" rel="stylesheet">
+</head>
+
+<body>
+    <div id="app">
+        <div class="container">
+
+            <form @submit.prevent="setName" v-if="name === ''">
+                <label for="">Digite seu nome</label>
+                <input class="input" type="text" ref='name' autofocus name="name" required>
+                <button class="button" type="submit">Entrar</button>
+            </form>
+            <div v-else>
+                <div v-if="room == ''">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Sala</th>
+                                <th>Quantidade de jogadores</th>
+                                <th>Esta em jogo</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="room in rooms">
+                                <td>
+                                    {{ room.name }}
+                                </td>
+                                <td>
+                                {{ room.players }}
+                            </td>
+                            <td>
+                                {{ room.playing ? 'Sim' : 'Não' }}
+                            </td>
+                            <td>
+                                <button class="button" :disabled="room.playing" type="button" @click="enterRoom(room)">Entrar</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <button class="button" v-if="!this.creating_room" @click="creating_room = true">Criar Sala</button>
+                <form v-else @submit.prevent="createRoom">
+                    <input class="input" type="text" autofocus ref='created_room' required>
+                    <button class="button">Criar</button>
+                </form>
+            </div>
+
+            <div v-else>
+                <h1 class="title">Nome da sala: {{ room.name }}</h1>
+                <button class="button" @click="leaveRoom">Sair da sala</button>
+                <button class="button" v-if="imLeader" @click="startGame">Começar o jogo</button>
+                <div>
+                    <div>
+                        <h1 class="subtitle">Baralho</h1>
+                        <span><b>{{ baralho }}</b> cartas no baralho</span>
+                    </div>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Qtd cartas</th>
+                                <th>Cartas Baixadas</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="player in players">
+                                <td> {{ player.id === id ? 'Você' : player.name }} </td>
+                                <td> {{ player.cards.length }} </td>
+                                <td>
+                                    <span v-for="(down, index) in player.downs">
+                                        <span v-for="card in down">
+                                            {{card.value}} {{card.naipe}}
+                                            <br>
+                                        </span>
+                                        <br>
+                                        <br>
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div v-if="gameStarted">
+
+                    <div>
+                        <p class="subtitle">Minhas cartas</p>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Naipe</th>
+                                    <th>Valor</th>
+                                    <th>Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="card in cards">
+                                    <td>
+                                        {{ card.naipe }}
+                                    </td>
+                                    <td>
+                                        {{ card.value }}
+                                    </td>
+                                    <td>
+                                        <button class="button" :disabled="!isMyTurn || !can_discard" @click="discardCard(card)">Descartar</button>
+                                        <button class="button" :disabled="!isMyTurn || selectedCards.indexOf(card) !== -1" @click="selectCard(card)">Selecionar</button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <button class="button" :disabled="selectedCards.length < 3" @click="downCards">Baixar cartas</button>
+                        <button class="button" :disabled="!isMyTurn" @click="buyCard">Comprar</button>
+                        <button class="button" :disabled="!isMyTurn || cards.length % 3 !== 0" @click="passTurn">Passar turno</button>
+                    </div>
+
+                    <div>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Naipe</th>
+                                    <th>Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(card, index) in trash">
+                                    <td> {{ card.naipe }} </td>
+                                    <td> {{ card.value }} </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.10/dist/vue.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+
+        new Vue({
+            el: "#app",
+            data() {
+                return {
+                    name: '',
+                    rooms: [],
+                    room: '',
+                    players: [],
+                    cards: [],
+                    baralho: 0,
+                    trash: [],
+                    downs: [],
+                    id: '',
+                    imLeader: false,
+                    selectedCards: [],
+                    socket: null,
+                    gameStarted: false,
+                    creating_room: false,
+                    isMyTurn: false,
+                    can_discard: false,
+                    can_down: false
+                };
+            },
+            created() {
+                this.socket = new io();
+                this.socket.on('connect', () => this.id = this.socket.id)
+
+                this.socket.on('show-rooms', (response) => {
+                    this.rooms = response;
+                });
+
+                this.socket.on('room-players', (players) => {
+                    this.players = players;
+                });
+
+                this.socket.on('start-game', () => {
+                    this.gameStarted = true;
+                });
+                this.socket.on('room-leader', (leader) => {
+                    this.imLeader = leader.id === this.id
+                });
+
+                this.socket.on('leaving-room', function () { console.log('leaving-room', arguments) });
+                this.socket.on('players-cards', (players) => {
+                    const me = players.find(player => player.id === this.id);
+                    this.cards = me.cards;
+                });
+                this.socket.on('buy-card', (card) => {
+                    this.cards.push(card);
+                    this.can_discard = true;
+                    this.can_down = true;
+                });
+
+                this.socket.on('next-turn', (player) => {
+                    this.isMyTurn = this.id === player.id;
+                });
+                this.socket.on('pass-turn', () => {
+                    this.can_discard = false,
+                    this.can_down = false;
+                });
+                this.socket.on('room-enter-player', function () { console.log('room-enter-player', arguments) });
+                this.socket.on('baralho-cards-total', (total) => {
+                    this.baralho = total;
+                });
+
+                this.socket.on('last-trash-card', (card) => {
+                    if (card) {
+                        console.log(card)
+                        this.trash.push(card)
+                    }
+                });
+                this.socket.on('down-cards', (canDown) => {
+
+                    if (canDown) {
+                        this.downs.push(this.selectedCards);
+                    } else {
+                        alert('Você não pode baixar essas cartas');
+                    }
+
+                    this.selectedCards = [];
+
+                });
+                this.socket.on('players-cards', function () { console.log('players-cards', arguments) });
+                this.socket.on('user-turn-buy-card', function () { console.log('user-turn-buy-card', arguments) });
+            },
+            methods: {
+                setName(event) {
+                    this.name = this.$refs.name.value;
+                    this.socket.emit('enter-name', this.name)
+                },
+                enterRoom(roomName) {
+                    this.room = roomName;
+                    this.socket.emit('enter-room', this.room.name);
+                },
+                createRoom() {
+                    this.room = { name: this.$refs.created_room.value };
+                    this.socket.emit('enter-room', this.room.name);
+                    this.creating_room = false;
+                },
+                leaveRoom() {
+                    this.room = '',
+                    this.socket.emit('leave-room')
+                },
+                buyCard() {
+                    this.socket.emit('buy-card')
+                },
+                passTurn() {
+                    this.socket.emit('pass-turn')
+                },
+                startGame() {
+                    this.socket.emit('start-game')
+                },
+                downCards() {
+                    this.socket.emit('down-cards', this.selectedCards);
+                },
+                selectCard(card) {
+                    this.selectedCards.push(card);
+                },
+                discardCard(card) {
+                    this.socket.emit('discard-card', card);
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
